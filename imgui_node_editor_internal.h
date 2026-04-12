@@ -451,9 +451,14 @@ struct Node final: Object
 
 enum LinkPathType {
     LinkPathType_Default,
+    // Horizontal pin layout (output dir = (+1,0), input dir = (-1,0))
     LinkPathType_Under_Over,
     LinkPathType_Over_Under,
-    LinkPathType_Under_Under
+    LinkPathType_Under_Under,
+    // Vertical pin layout (output dir = (0,+1), input dir = (0,-1))
+    LinkPathType_Right_Left,
+    LinkPathType_Left_Right,
+    LinkPathType_Right_Right
 };
 
 struct LinkPath {

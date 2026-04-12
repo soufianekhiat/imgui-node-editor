@@ -978,26 +978,41 @@ void ed::Link::UpdateEndpoints()
 
 ed::LinkPathType ed::Link::GetPathType(ImRect& fromRect, ImRect& toRect) const
 {
-    const bool isDefault = m_StartPin && m_StartPin->m_Dir != ImVec2(1.0f, 0.0f)
-            || m_EndPin && m_EndPin->m_Dir != ImVec2(-1.0f, 0.0f)
-            || !m_EndPin || !m_EndPin->m_Node
-            || !m_StartPin || !m_StartPin->m_Node;
-
-    if(isDefault)
+    if(!m_StartPin || !m_StartPin->m_Node || !m_EndPin || !m_EndPin->m_Node)
         return LinkPathType_Default;
 
+    const bool horizontal = m_StartPin->m_Dir == ImVec2( 1.0f,  0.0f)
+                         && m_EndPin  ->m_Dir == ImVec2(-1.0f,  0.0f);
+    const bool vertical   = m_StartPin->m_Dir == ImVec2( 0.0f,  1.0f)
+                         && m_EndPin  ->m_Dir == ImVec2( 0.0f, -1.0f);
+
+    if(!horizontal && !vertical)
+        return LinkPathType_Default;
 
     fromRect = m_StartPin->m_Node->m_Bounds;
-    toRect = m_EndPin->m_Node->m_Bounds;
+    toRect   = m_EndPin  ->m_Node->m_Bounds;
 
-    if(m_End.x > fromRect.Max.x)
-        return ed::LinkPathType_Default;
-    else if(toRect.Min.y > fromRect.Max.y)
-        return ed::LinkPathType_Under_Over;
-    else if(toRect.Max.y < fromRect.Min.y)
-        return ed::LinkPathType_Over_Under;
+    if(horizontal)
+    {
+        if(m_End.x > fromRect.Max.x)
+            return LinkPathType_Default;
+        else if(toRect.Min.y > fromRect.Max.y)
+            return LinkPathType_Under_Over;
+        else if(toRect.Max.y < fromRect.Min.y)
+            return LinkPathType_Over_Under;
 
-    return ed::LinkPathType_Under_Under;
+        return LinkPathType_Under_Under;
+    }
+
+    // vertical
+    if(m_End.y > fromRect.Max.y)
+        return LinkPathType_Default;
+    else if(toRect.Min.x > fromRect.Max.x)
+        return LinkPathType_Right_Left;
+    else if(toRect.Max.x < fromRect.Min.x)
+        return LinkPathType_Left_Right;
+
+    return LinkPathType_Right_Right;
 }
 
 ed::LinkPath ed::Link::GetCurve() const
@@ -1142,6 +1157,103 @@ ed::LinkPath ed::Link::GetCurve() const
         result.m_Points[result.m_NumPoint++] = m_End + ImVec2(-margin - xsep, margin);
         result.m_Points[result.m_NumPoint++] = m_End + ImVec2(-margin - xsep, margin - rounding);
         result.m_Points[result.m_NumPoint++] = m_End + ImVec2(-rounding, 0.0f);
+        result.m_Points[result.m_NumPoint++] = m_End;
+    }
+    else if(pathType == ed::LinkPathType_Right_Left)
+    {
+        // Vertical analog of Under_Over: source output pointing down, target input
+        // pointing up, target is to the right and above source. Route around the
+        // right side of source through the X-gap between the two nodes.
+        const float middle = (fromRect.Max.x + toRect.Min.x) / 2.0f;
+        const float ymax = ImMax(m_Start.y, m_End.y);
+        const float ymin = ImMin(m_Start.y, m_End.y);
+
+        // corner 1 (down -> right)
+        result.m_Points[result.m_NumPoint++] = m_Start;
+        result.m_Points[result.m_NumPoint++] = m_Start + ImVec2(0.0f, rounding);
+        result.m_Points[result.m_NumPoint++] = m_Start + ImVec2(margin - rounding, margin + ysep);
+        result.m_Points[result.m_NumPoint++] = m_Start + ImVec2(margin, margin + ysep);
+
+        // corner 2 (right -> up) at middle_x
+        result.m_Points[result.m_NumPoint++] = ImVec2(middle - margin + xsep, m_Start.y + margin + ysep);
+        result.m_Points[result.m_NumPoint++] = ImVec2(middle - margin + rounding + xsep, m_Start.y + margin + ysep);
+        result.m_Points[result.m_NumPoint++] = ImVec2(middle + xsep, m_Start.y + rounding + ysep);
+        result.m_Points[result.m_NumPoint++] = ImVec2(middle + xsep, ymax);
+
+        // corner 3 (up -> left) at middle_x, target level
+        result.m_Points[result.m_NumPoint++] = ImVec2(middle + xsep, ymin - ysep);
+        result.m_Points[result.m_NumPoint++] = ImVec2(middle + xsep, m_End.y - ysep - rounding);
+        result.m_Points[result.m_NumPoint++] = ImVec2(middle - rounding + xsep, m_End.y - ysep - margin);
+        result.m_Points[result.m_NumPoint++] = ImVec2(middle + xsep, m_End.y - ysep - margin);
+
+        // corner 4 (left -> down into End)
+        result.m_Points[result.m_NumPoint++] = m_End + ImVec2(margin, -ysep - margin);
+        result.m_Points[result.m_NumPoint++] = m_End + ImVec2(margin - rounding, -ysep - margin);
+        result.m_Points[result.m_NumPoint++] = m_End + ImVec2(0.0f, -ysep - rounding);
+        result.m_Points[result.m_NumPoint++] = m_End;
+    }
+    else if(pathType == ed::LinkPathType_Left_Right)
+    {
+        // Vertical analog of Over_Under: target to the left and above source.
+        // Route around the left side of source through the X-gap.
+        const float middle = (fromRect.Min.x + toRect.Max.x) / 2.0f;
+        const float ymax = ImMax(m_Start.y, m_End.y);
+        const float ymin = ImMin(m_Start.y, m_End.y);
+
+        // corner 1 (down -> left)
+        result.m_Points[result.m_NumPoint++] = m_Start;
+        result.m_Points[result.m_NumPoint++] = m_Start + ImVec2(0.0f, rounding);
+        result.m_Points[result.m_NumPoint++] = m_Start + ImVec2(-margin + rounding, margin + ysep);
+        result.m_Points[result.m_NumPoint++] = m_Start + ImVec2(-margin, margin + ysep);
+
+        // corner 2 (left -> up) at middle_x
+        result.m_Points[result.m_NumPoint++] = ImVec2(middle + ysep + margin, m_Start.y + margin + ysep);
+        result.m_Points[result.m_NumPoint++] = ImVec2(middle + ysep + margin - rounding, m_Start.y + margin + ysep);
+        result.m_Points[result.m_NumPoint++] = ImVec2(middle + ysep, m_Start.y + rounding);
+        result.m_Points[result.m_NumPoint++] = ImVec2(middle + ysep, ymax);
+
+        // corner 3 (up -> right) at middle_x, target level
+        result.m_Points[result.m_NumPoint++] = ImVec2(middle + ysep, ymin);
+        result.m_Points[result.m_NumPoint++] = ImVec2(middle + ysep, m_End.y - rounding);
+        result.m_Points[result.m_NumPoint++] = ImVec2(middle + ysep - margin + rounding, m_End.y - ysep - margin);
+        result.m_Points[result.m_NumPoint++] = ImVec2(middle + ysep - margin, m_End.y - ysep - margin);
+
+        // corner 4 (right -> down into End)
+        result.m_Points[result.m_NumPoint++] = m_End + ImVec2(-margin - ysep, -ysep - margin);
+        result.m_Points[result.m_NumPoint++] = m_End + ImVec2(-margin - ysep + rounding, -ysep - margin);
+        result.m_Points[result.m_NumPoint++] = m_End + ImVec2(0.0f, -ysep - rounding);
+        result.m_Points[result.m_NumPoint++] = m_End;
+    }
+    else if(pathType == ed::LinkPathType_Right_Right)
+    {
+        // Vertical analog of Under_Under: X-overlap between nodes, route around
+        // the right side of both.
+        const float right = ImMax(fromRect.Max.x, toRect.Max.x) + margin + ysep;
+        const float ymax = ImMax(m_Start.y, m_End.y);
+        const float ymin = ImMin(m_Start.y, m_End.y);
+
+        // corner 1 (down -> right)
+        result.m_Points[result.m_NumPoint++] = m_Start;
+        result.m_Points[result.m_NumPoint++] = m_Start + ImVec2(0.0f, rounding);
+        result.m_Points[result.m_NumPoint++] = m_Start + ImVec2(margin - rounding, margin + ysep);
+        result.m_Points[result.m_NumPoint++] = m_Start + ImVec2(margin, margin + ysep);
+
+        // corner 2 (right -> up) at right side of both
+        result.m_Points[result.m_NumPoint++] = ImVec2(right - margin, m_Start.y + margin + ysep);
+        result.m_Points[result.m_NumPoint++] = ImVec2(right - margin + rounding, m_Start.y + margin + ysep);
+        result.m_Points[result.m_NumPoint++] = ImVec2(right, m_Start.y + rounding);
+        result.m_Points[result.m_NumPoint++] = ImVec2(right, ymax);
+
+        // corner 3 (up -> left) at right side, target level
+        result.m_Points[result.m_NumPoint++] = ImVec2(right, ymin);
+        result.m_Points[result.m_NumPoint++] = ImVec2(right, m_End.y - rounding);
+        result.m_Points[result.m_NumPoint++] = ImVec2(right - margin + rounding, m_End.y - margin - ysep);
+        result.m_Points[result.m_NumPoint++] = ImVec2(right - margin, m_End.y - margin - ysep);
+
+        // corner 4 (left -> down into End)
+        result.m_Points[result.m_NumPoint++] = m_End + ImVec2(margin, -margin - ysep);
+        result.m_Points[result.m_NumPoint++] = m_End + ImVec2(margin - rounding, -margin - ysep);
+        result.m_Points[result.m_NumPoint++] = m_End + ImVec2(0.0f, -rounding);
         result.m_Points[result.m_NumPoint++] = m_End;
     }
     return result;
