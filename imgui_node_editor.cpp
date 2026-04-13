@@ -1855,10 +1855,43 @@ void ed::EditorContext::End()
 
         m_DrawList->AddRectFilled(VIEW_POS, VIEW_POS + VIEW_SIZE, GetColor(StyleColor_Bg));
 
-        for (float x = fmodf(offset.x, GRID_SX); x < VIEW_SIZE.x; x += GRID_SX)
-            m_DrawList->AddLine(ImVec2(x, 0.0f) + VIEW_POS, ImVec2(x, VIEW_SIZE.y) + VIEW_POS, GRID_COLOR);
+        // Dots at grid intersections with a halo around the mouse cursor:
+        // dots within `halo_radius` pixels get larger and more opaque, with
+        // a linear falloff. Falls back to a plain dot outside the halo.
+        float const dot_radius   = ImMax(1.0f, 1.5f * m_Canvas.ViewScale());
+        int   const dot_segs     = 6;
+        float const halo_radius  = 96.0f;
+        float const halo_r_sq    = halo_radius * halo_radius;
+        float const halo_extra_r = 2.5f;   // +px at centre
+        ImVec2 const mouse       = ImGui::GetMousePos();
+
+        // Extract base RGBA so we can modulate alpha per-dot.
+        ImU32 const base_rgb   = GRID_COLOR & 0x00FFFFFFu;
+        int   const base_alpha = (GRID_COLOR >> IM_COL32_A_SHIFT) & 0xFF;
+
         for (float y = fmodf(offset.y, GRID_SY); y < VIEW_SIZE.y; y += GRID_SY)
-            m_DrawList->AddLine(ImVec2(0.0f, y) + VIEW_POS, ImVec2(VIEW_SIZE.x, y) + VIEW_POS, GRID_COLOR);
+        {
+            for (float x = fmodf(offset.x, GRID_SX); x < VIEW_SIZE.x; x += GRID_SX)
+            {
+                ImVec2 const p  = ImVec2(x, y) + VIEW_POS;
+                float  const dx = p.x - mouse.x;
+                float  const dy = p.y - mouse.y;
+                float  const d2 = dx * dx + dy * dy;
+
+                if (d2 < halo_r_sq)
+                {
+                    float const t     = 1.0f - ImSqrt(d2) / halo_radius;
+                    float const r     = dot_radius + halo_extra_r * t;
+                    int   const ai    = base_alpha + static_cast<int>((255 - base_alpha) * t);
+                    ImU32 const color = base_rgb | (static_cast<ImU32>(ImClamp(ai, 0, 255)) << IM_COL32_A_SHIFT);
+                    m_DrawList->AddCircleFilled(p, r, color, dot_segs);
+                }
+                else
+                {
+                    m_DrawList->AddCircleFilled(p, dot_radius, GRID_COLOR, dot_segs);
+                }
+            }
+        }
     }
 # endif
 
@@ -4351,39 +4384,12 @@ bool ed::DragAction::Process(const Control& control)
         auto draggedOrigin  = m_DraggedObject->DragStartLocation();
         auto alignPivot     = ImVec2(0, 0);
 
-        // TODO: Move this experimental alignment to closes pivot out of internals to node API
-        if (auto draggedNode = m_DraggedObject->AsNode())
-        {
-            float x = FLT_MAX;
-            float y = FLT_MAX;
-
-            auto testPivot = [this, &x, &y, &draggedOrigin, &dragOffset, &alignPivot](const ImVec2& pivot)
-            {
-                auto initial   = draggedOrigin + dragOffset + pivot;
-                auto candidate = Editor->AlignPointToGrid(initial) - draggedOrigin - pivot;
-
-                if (ImFabs(candidate.x) < ImFabs(ImMin(x, FLT_MAX)))
-                {
-                    x = candidate.x;
-                    alignPivot.x = pivot.x;
-                }
-
-                if (ImFabs(candidate.y) < ImFabs(ImMin(y, FLT_MAX)))
-                {
-                    y = candidate.y;
-                    alignPivot.y = pivot.y;
-                }
-            };
-
-            for (auto pin = draggedNode->m_LastPin; pin; pin = pin->m_PreviousPin)
-            {
-                auto pivot = pin->m_Pivot.GetCenter() - draggedNode->m_Bounds.Min;
-                testPivot(pivot);
-            }
-
-            //testPivot(point(0, 0));
-        }
-
+        // Snap the node's ORIGIN (top-left) to the grid. Previously this
+        // iterated every pin pivot and picked per-axis whichever came
+        // closest; but with pins placed at non-grid X offsets that caused
+        // the node origin to land half-way between dots horizontally, and
+        // made Y jitter between the input-row and output-row dominance.
+        // Origin-snap gives a deterministic, visually predictable result.
         auto alignedOffset  = Editor->AlignPointToGrid(draggedOrigin + dragOffset + alignPivot) - draggedOrigin - alignPivot;
 
         if (!ImGui::GetIO().KeyAlt)

@@ -1479,8 +1479,10 @@ struct EditorContext
 
     float AlignPointToGrid(float p) const
     {
+        // Snap to the same 32 px pitch used by the dot grid. Hold ALT while
+        // dragging to bypass snapping.
         if (!ImGui::GetIO().KeyAlt)
-            return p - ImFmod(p, 16.0f);
+            return p - ImFmod(p, 32.0f);
         else
             return p;
     }
