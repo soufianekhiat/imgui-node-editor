@@ -236,6 +236,11 @@ bool ax::NodeEditor::Link(LinkId id, PinId startPinId, PinId endPinId, const ImV
     return s_Editor->DoLink(id, startPinId, endPinId, ImColor(color), thickness);
 }
 
+void ax::NodeEditor::SetNextLinkStyle(bool dashed, float dashOn, float dashOff, float coreThickness, ImU32 coreColor, bool flow, float flowT, ImU32 flowColor)
+{
+    s_Editor->SetNextLinkStyle(dashed, dashOn, dashOff, coreThickness, coreColor, flow, flowT, flowColor);
+}
+
 void ax::NodeEditor::Flow(LinkId linkId, FlowDirection direction)
 {
     if (auto link = s_Editor->FindLink(linkId))

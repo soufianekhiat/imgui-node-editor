@@ -329,6 +329,14 @@ IMGUI_NODE_EDITOR_API ImDrawList* GetNodeBackgroundDrawList(NodeId nodeId);
 
 IMGUI_NODE_EDITOR_API bool Link(LinkId id, PinId startPinId, PinId endPinId, const ImVec4& color = ImVec4(1, 1, 1, 1), float thickness = 1.0f);
 
+// Design-system per-link styling applied to the NEXT Link() call. The link is
+// still routed by the editor (GetCurve), but rendered with this DS stroke:
+//  - dashed: draw the main stroke as a dash pattern (dashOn/dashOff, canvas units)
+//  - coreThickness/coreColor: a thin centre stripe over the main stroke (0 = none)
+//  - flow/flowT/flowColor: an animated dot travelling the routed path (flowT in [0,1))
+// Values are in canvas units (the editor scales by zoom). Call before Link().
+IMGUI_NODE_EDITOR_API void SetNextLinkStyle(bool dashed, float dashOn, float dashOff, float coreThickness, ImU32 coreColor, bool flow, float flowT, ImU32 flowColor);
+
 IMGUI_NODE_EDITOR_API void Flow(LinkId linkId, FlowDirection direction = FlowDirection::Forward);
 
 IMGUI_NODE_EDITOR_API bool BeginCreate(const ImVec4& color = ImVec4(1, 1, 1, 1), float thickness = 1.0f);

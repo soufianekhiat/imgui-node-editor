@@ -906,19 +906,25 @@ void ed::Link::Draw(ImDrawList* drawList, DrawFlags flags)
     }
     else if (flags & Selected)
     {
-        const auto borderColor = Editor->GetColor(StyleColor_SelLinkBorder);
+        // DS links draw a hue-tinted spline halo (matching the routed curve)
+        // instead of the editor's straight border colour.
+        const auto borderColor = m_DsStyled
+            ? ((m_Color & 0x00FFFFFFu) | (ImU32(107) << IM_COL32_A_SHIFT))
+            : Editor->GetColor(StyleColor_SelLinkBorder);
 
         drawList->ChannelsSetCurrent(c_LinkChannel_Selection);
 
-        Draw(drawList, borderColor, 4.5f);
+        Draw(drawList, borderColor, m_DsStyled ? 7.0f : 4.5f);
     }
     else if (flags & Hovered)
     {
-        const auto borderColor = Editor->GetColor(StyleColor_HovLinkBorder);
+        const auto borderColor = m_DsStyled
+            ? ((m_Color & 0x00FFFFFFu) | (ImU32(46) << IM_COL32_A_SHIFT))
+            : Editor->GetColor(StyleColor_HovLinkBorder);
 
         drawList->ChannelsSetCurrent(c_LinkChannel_Selection);
 
-        Draw(drawList, borderColor, 2.0f);
+        Draw(drawList, borderColor, m_DsStyled ? 5.0f : 2.0f);
     }
     else if (flags & Highlighted)
     {
@@ -928,12 +934,103 @@ void ed::Link::Draw(ImDrawList* drawList, DrawFlags flags)
     }
 }
 
+// --- Design-system link rendering helpers ----------------------------------
+static inline float ImLen_(const ImVec2& v) { return ImSqrt(v.x * v.x + v.y * v.y); }
+
+// Flatten a (possibly multi-segment, routed) LinkPath into a screen-space
+// polyline by subdividing each cubic group; straight connectors between groups
+// fall out for free as consecutive endpoints.
+static void ImLink_Flatten(const ed::LinkPath& curve, ImVector<ImVec2>& out)
+{
+    out.resize(0);
+    struct Sink { ImVector<ImVec2>* o; void operator()(const ImCubicBezierSubdivideSample& r) { o->push_back(r.Point); } } sink{ &out };
+    for (int i = 0; i + 3 < curve.m_NumPoint; i += 4)
+    {
+        out.push_back(curve.m_Points[i]);
+        ImCubicBezierSubdivide(sink, curve.m_Points[i], curve.m_Points[i + 1], curve.m_Points[i + 2], curve.m_Points[i + 3]);
+    }
+    if (curve.m_NumPoint > 0)
+        out.push_back(curve.m_Points[curve.m_NumPoint - 1]);
+}
+
+static float ImPolyline_Length(const ImVector<ImVec2>& pts)
+{
+    float len = 0.0f;
+    for (int i = 1; i < pts.Size; ++i) len += ImLen_(pts[i] - pts[i - 1]);
+    return len;
+}
+
+static ImVec2 ImPolyline_PointAt(const ImVector<ImVec2>& pts, float dist)
+{
+    for (int i = 1; i < pts.Size; ++i)
+    {
+        const float seg = ImLen_(pts[i] - pts[i - 1]);
+        if (dist <= seg) { const float t = seg > 0.0f ? dist / seg : 0.0f; return pts[i - 1] + (pts[i] - pts[i - 1]) * t; }
+        dist -= seg;
+    }
+    return pts.Size ? pts[pts.Size - 1] : ImVec2(0, 0);
+}
+
+static void ImLink_AddDashedPolyline(ImDrawList* dl, const ImVector<ImVec2>& pts, ImU32 col, float thickness, float dashOn, float dashOff)
+{
+    if (dashOn <= 0.0f) { dl->AddPolyline(pts.Data, pts.Size, col, 0, thickness); return; }
+    bool on = true; float rem = dashOn;
+    for (int i = 1; i < pts.Size; ++i)
+    {
+        const ImVec2 a = pts[i - 1], b = pts[i];
+        const float  seg = ImLen_(b - a);
+        if (seg <= 0.0f) continue;
+        float t0 = 0.0f;
+        while (t0 < seg)
+        {
+            const float step = ImMin(rem, seg - t0);
+            if (on)
+                dl->AddLine(a + (b - a) * (t0 / seg), a + (b - a) * ((t0 + step) / seg), col, thickness);
+            t0 += step; rem -= step;
+            if (rem <= 0.0001f) { on = !on; rem = on ? dashOn : dashOff; }
+        }
+    }
+}
+
 void ed::Link::Draw(ImDrawList* drawList, ImU32 color, float extraThickness) const
 {
     if (!m_IsLive)
         return;
 
     const auto curve = GetCurve();
+
+    // Design-system stroke: render along the editor's ROUTED curve so the
+    // visible link, selection halo and hit-test all share one path.
+    if (m_DsStyled)
+    {
+        ImVector<ImVec2> poly;
+        ImLink_Flatten(curve, poly);
+        if (poly.Size < 2)
+            return;
+
+        if (extraThickness > 0.0f)
+        {
+            // Halo pass (hover / selected): one wide translucent stroke.
+            drawList->AddPolyline(poly.Data, poly.Size, color, 0, m_Thickness + extraThickness * 2.0f);
+            return;
+        }
+
+        if (m_DsDashed)
+            ImLink_AddDashedPolyline(drawList, poly, color, m_Thickness, m_DsDashOn, m_DsDashOff);
+        else
+            drawList->AddPolyline(poly.Data, poly.Size, color, 0, m_Thickness);
+
+        if (m_DsCore > 0.0f)
+            drawList->AddPolyline(poly.Data, poly.Size, m_DsCoreColor, 0, m_DsCore);
+
+        if (m_DsFlow)
+        {
+            const float total = ImPolyline_Length(poly);
+            const float d     = (m_DsFlowT - ImFloor(m_DsFlowT)) * total;
+            drawList->AddCircleFilled(ImPolyline_PointAt(poly, d), m_Thickness * 1.4f + 1.0f, m_DsFlowColor, 0);
+        }
+        return;
+    }
 
     for(int i = 0; i < curve.m_NumPoint; i += 4)
     {
@@ -2027,9 +2124,37 @@ bool ed::EditorContext::DoLink(LinkId id, PinId startPinId, PinId endPinId, ImU3
     link->m_Thickness     = thickness;
     link->m_IsLive        = true;
 
+    // Apply (and consume) the design-system stroke style requested for this link.
+    link->m_DsStyled = m_NextLinkStyle.m_Active;
+    if (m_NextLinkStyle.m_Active)
+    {
+        link->m_DsDashed    = m_NextLinkStyle.m_Dashed;
+        link->m_DsDashOn    = m_NextLinkStyle.m_DashOn;
+        link->m_DsDashOff   = m_NextLinkStyle.m_DashOff;
+        link->m_DsCore      = m_NextLinkStyle.m_Core;
+        link->m_DsCoreColor = m_NextLinkStyle.m_CoreColor;
+        link->m_DsFlow      = m_NextLinkStyle.m_Flow;
+        link->m_DsFlowT     = m_NextLinkStyle.m_FlowT;
+        link->m_DsFlowColor = m_NextLinkStyle.m_FlowColor;
+    }
+    m_NextLinkStyle.m_Active = false;
+
     link->UpdateEndpoints();
 
     return true;
+}
+
+void ed::EditorContext::SetNextLinkStyle(bool dashed, float dashOn, float dashOff, float coreThickness, ImU32 coreColor, bool flow, float flowT, ImU32 flowColor)
+{
+    m_NextLinkStyle.m_Active    = true;
+    m_NextLinkStyle.m_Dashed    = dashed;
+    m_NextLinkStyle.m_DashOn    = dashOn;
+    m_NextLinkStyle.m_DashOff   = dashOff;
+    m_NextLinkStyle.m_Core      = coreThickness;
+    m_NextLinkStyle.m_CoreColor = coreColor;
+    m_NextLinkStyle.m_Flow      = flow;
+    m_NextLinkStyle.m_FlowT     = flowT;
+    m_NextLinkStyle.m_FlowColor = flowColor;
 }
 
 void ed::EditorContext::SetNodePosition(NodeId nodeId, const ImVec2& position)

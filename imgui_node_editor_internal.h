@@ -480,6 +480,18 @@ struct Link final: Object
     ImVec2 m_Start;
     ImVec2 m_End;
 
+    // Design-system per-link stroke style (set via SetNextLinkStyle). When
+    // m_DsStyled is false the link draws the classic solid bezier.
+    bool   m_DsStyled    = false;
+    bool   m_DsDashed    = false;
+    float  m_DsDashOn    = 0.0f;
+    float  m_DsDashOff   = 0.0f;
+    float  m_DsCore      = 0.0f;
+    ImU32  m_DsCoreColor = 0;
+    bool   m_DsFlow      = false;
+    float  m_DsFlowT     = 0.0f;
+    ImU32  m_DsFlowColor = 0;
+
     Link(EditorContext* editor, LinkId id)
         : Object(editor)
         , m_ID(id)
@@ -1321,6 +1333,22 @@ struct EditorContext
     void End();
 
     bool DoLink(LinkId id, PinId startPinId, PinId endPinId, ImU32 color, float thickness);
+
+    // Design-system per-link style applied to the NEXT DoLink() call.
+    struct NextLinkStyle
+    {
+        bool   m_Active     = false;
+        bool   m_Dashed     = false;
+        float  m_DashOn     = 0.0f;
+        float  m_DashOff    = 0.0f;
+        float  m_Core       = 0.0f;
+        ImU32  m_CoreColor  = 0;
+        bool   m_Flow       = false;
+        float  m_FlowT      = 0.0f;
+        ImU32  m_FlowColor  = 0;
+    };
+    NextLinkStyle m_NextLinkStyle;
+    void SetNextLinkStyle(bool dashed, float dashOn, float dashOff, float coreThickness, ImU32 coreColor, bool flow, float flowT, ImU32 flowColor);
 
 
     NodeBuilder& GetNodeBuilder() { return m_NodeBuilder; }
