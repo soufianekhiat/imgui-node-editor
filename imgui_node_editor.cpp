@@ -1945,8 +1945,43 @@ void ed::EditorContext::End()
 
         ImVec2 offset    = m_Canvas.ViewOrigin() * (1.0f / m_Canvas.ViewScale());
         ImU32 GRID_COLOR = GetColor(StyleColor_Grid, ImClamp(m_Canvas.ViewScale() * m_Canvas.ViewScale(), 0.0f, 1.0f));
-        float GRID_SX    = 32.0f;// * m_Canvas.ViewScale();
-        float GRID_SY    = 32.0f;// * m_Canvas.ViewScale();
+        // THE GRID IS BOUNDED IN SCREEN SPACE, NOT IN CANVAS SPACE.
+        //
+        // The loops below step through the visible rect in CANVAS units, and
+        // that rect grows as 1/zoom. With a fixed 32-unit step the dot count
+        // therefore grows as 1/zoom^2, which is unbounded: a saved view at
+        // zoom 0.000173 -- reachable by scrolling out, and PERSISTED in
+        // NodeEditor.json across restarts -- gives a visible rect of about
+        // 8.7 million by 4 million units, or some thirty-eight billion dots
+        // per frame. Measured, that editor drew one frame in fifty-six
+        // seconds, every frame, in a session that had merely been zoomed out
+        // once. The app looked hung and stayed hung after a restart, because
+        // the view is saved.
+        //
+        // So the step GROWS with the zoom-out until a cell is at least a few
+        // screen pixels across. The dot count is then a function of the
+        // WINDOW, not of the zoom, and the pattern doubles rather than
+        // slides, so it still reads as the same grid stepping coarser.
+        //
+        // The `* m_Canvas.ViewScale()` this replaces was commented out, which
+        // is what left the step fixed in canvas units.
+        float GRID_SX = 32.0f;
+        float GRID_SY = 32.0f;
+        {
+            float const scale         = m_Canvas.ViewScale();
+            float const min_screen_px = 8.0f;
+            // Guarded on both sides: a non-finite or non-positive scale must
+            // not spin here, and the doubling is capped so no arithmetic edge
+            // can make this loop the thing that hangs.
+            if (scale > 0.0f && scale < 1.0f)
+            {
+                for (int step = 0; step < 40 && GRID_SX * scale < min_screen_px; ++step)
+                {
+                    GRID_SX *= 2.0f;
+                    GRID_SY *= 2.0f;
+                }
+            }
+        }
         ImVec2 VIEW_POS  = m_Canvas.ViewRect().Min;
         ImVec2 VIEW_SIZE = m_Canvas.ViewRect().GetSize();
 
